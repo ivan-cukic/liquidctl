@@ -89,6 +89,24 @@ class UsbDeviceDriver(BaseDriver):
     SUPPORTED_DEVICES = []
 
     @classmethod
+    def probe(cls, handle, vendor=None, product=None, release=None, serial=None, **kwargs):
+        LOGGER.debug('Checking %s', cls.__name__)
+        devs = []
+        for vid, pid, _, description, devargs in cls.SUPPORTED_DEVICES:
+            if (vendor and vendor != vid) or handle.vendor_id != vid:
+                continue
+            if (product and product != pid) or handle.product_id != pid:
+                continue
+            if release and handle.release_number != release:
+                continue
+            if serial and handle.serial_number != serial:
+                continue
+            consargs = devargs.copy()
+            consargs.update(kwargs)
+            devs.append(cls(handle, description, **consargs))
+        return devs
+
+    @classmethod
     def find_supported_devices(cls, **kwargs):
         """Find and bind to compatible devices."""
         drivers = []
@@ -281,8 +299,12 @@ class PyUsbDevice:
                                          timeout=timeout)
 
     @classmethod
-    def enumerate(cls, vid, pid):
-        for handle in usb.core.find(idVendor=vid, idProduct=pid, find_all=True):
+    def enumerate(cls, vid=None, pid=None):
+        args = {}
+        if vid:
+            args['idVendor'] = vid
+            args['idProduct'] = pid
+        for handle in usb.core.find(find_all=True, **args):
             yield cls(handle)
 
     @property
@@ -390,8 +412,8 @@ class HidapiDevice:
         return self.hiddev.write(data)
 
     @classmethod
-    def enumerate(cls, api, vid, pid):
-        for info in api.enumerate(vid, pid):
+    def enumerate(cls, api, vid=None, pid=None):
+        for info in api.enumerate(vid or 0, pid or 0):
             yield cls(api, info)
 
     @property
@@ -422,3 +444,68 @@ class HidapiDevice:
     def port(self):
         return None
 
+
+class Bus:
+    @classmethod
+    def find_devices(cls, **kwargs):
+        return []
+
+
+class Hid(Bus):
+    @classmethod
+    def find_devices(cls, vendor=None, product=None, hid=None, bus=None,
+                     address=None, usb_port=None, **kwargs):
+        if hid == 'hidraw' or hid == 'hid':
+            wrapper = HidapiDevice
+        elif hid == 'usb':
+            wrapper = PyUsbHid
+        elif sys.platform.startswith('darwin'):
+            wrapper = HidapiDevice
+            hid = 'hid'
+        else:
+            wrapper = PyUsbHid
+
+        if wrapper == HidapiDevice:
+            api = importlib.import_module(hid)
+            handles = HidapiDevice.enumerate(api, vendor, product)
+        else:
+            handles = PyUsbDevice.enumerate(vendor, product)
+
+        devs = []
+        for handle in handles:
+            LOGGER.debug('%s=%s: device %s:%s', cls.__name__.lower(),
+                         handle.api.__name__, hex(handle.vendor_id),
+                         hex(handle.product_id))
+            if bus and handle.bus != bus:
+                continue
+            if address and handle.addres != address:
+                continue
+            if usb_port and handle.port != usb_port:
+                continue
+            for drv in UsbHidDriver.__subclasses__():
+                devs += drv.probe(handle, vendor=vendor, product=None, **kwargs)
+        return devs
+
+
+class Usb(Bus):
+    @classmethod
+    def find_devices(cls, vendor=None, product=None, bus=None, address=None,
+                     usb_port=None, **kwargs):
+        devs = []
+        for handle in PyUsbDevice.enumerate(vendor, product):
+            LOGGER.debug('%s: device %s:%s', cls.__name__.lower(),
+                         hex(handle.vendor_id), hex(handle.product_id))
+            LOGGER.debug('yay')
+            if bus and handle.bus != bus:
+                continue
+            if address and handle.addres != address:
+                continue
+            if usb_port and handle.port != usb_port:
+                continue
+            for drv in UsbDeviceDriver.__subclasses__():
+                LOGGER.debug('calling %s.probe', drv.__name__)
+                devs += drv.probe(handle, vendor=vendor, product=product, **kwargs)
+        return devs
+
+
+BUSES = Bus.__subclasses__()

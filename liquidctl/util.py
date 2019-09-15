@@ -93,3 +93,13 @@ def color_from_str(x):
     if len(x) != 6:
         raise ValueError('Cannot parse color: {}'.format(x))
     return list(bytes.fromhex(x))
+
+
+from liquidctl.driver.usb import BUSES
+
+
+def find_devices(bus=None, **kwargs):
+    devs = []
+    for bus_cls in filter(lambda cls: not bus or bus.startswith(cls.__name__.lower()), BUSES):
+        devs += bus_cls.find_devices(bus=bus, **kwargs)
+    return devs

@@ -106,6 +106,8 @@ LOGGER = logging.getLogger(__name__)
 
 
 def find_all_supported_devices(**kwargs):
+    """Deprecated."""
+    LOGGER.warning('deprecated: use liquidctl.util.find_devices instead')
     res = map(lambda driver: driver.find_supported_devices(**kwargs), DRIVERS)
     return itertools.chain(*res)
 
@@ -208,8 +210,9 @@ def main():
 
     frwd = _get_options_to_forward(args)
 
-    all_devices = list(enumerate(find_all_supported_devices(**frwd)))
-    selected = _filter_devices(all_devices, args)
+    # all_devices = list(enumerate(find_all_supported_devices(**frwd)))
+    # selected = _filter_devices(all_devices, args)
+    selected = list(enumerate(liquidctl.util.find_devices(**frwd)))
 
     if args['list']:
         _list_devices(selected, args)
